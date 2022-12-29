@@ -1,35 +1,12 @@
 /* tinylisp-commented.c with NaN boxing by Robert A. van Engelen 2022 */
 /* tinylisp.c but adorned with comments in an (overly) verbose C style */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* we only need two types to implement a Lisp interpreter:
-        I    unsigned integer (either 16 bit, 32 bit or 64 bit unsigned)
-        L    Lisp expression (double with NaN boxing)
-   I variables and function parameters are named as follows:
-        i    any unsigned integer, e.g. a NaN-boxed ordinal value
-        t    a NaN-boxing tag
-   L variables and function parameters are named as follows:
-        x,y  any Lisp expression
-        n    number
-        t    list
-        f    function or Lisp primitive
-        p    pair, a cons of two Lisp expressions
-        e,d  environment, a list of pairs, e.g. created with (define v x)
-        v    the name of a variable (an atom) or a list of variables */
-#define I unsigned
-#define L double
-
-/* T(x) returns the tag bits of a NaN-boxed Lisp expression x */
-#define T(x) *(unsigned long long *)&x >> 48
-
-/* address of the atom heap is at the bottom of the cell stack */
-#define A (char *)cell
-
-/* number of cells for the shared stack and atom heap, increase N as desired */
-#define N (1024 * 10)
+#include "tinylisp.h"
 
 /* hp: heap pointer, A+hp with hp=0 points to the first atom string in cell[]
    sp: stack pointer, the stack starts at the top of cell[] with sp=N
@@ -44,7 +21,7 @@ I hp = 0, sp = N;
   silent NaN The next 3 bits are the ones that tags use - so there are max 8
   values, but we need 5.
  */
-I ATOM = 0x7ff8, PRIM = 0x7ff9, CONS = 0x7ffa, CLOS = 0x7ffb, NIL = 0x7ffc;
+const I ATOM = 0x7ff8, PRIM = 0x7ff9, CONS = 0x7ffa, CLOS = 0x7ffb, NIL = 0x7ffc;
 
 /* cell[N] array of Lisp expressions, shared by the stack and atom heap */
 L cell[N];
@@ -292,22 +269,25 @@ L apply(L f, L t, L e) {
   return T(f) == PRIM ? prim[ord(f)].f(t, e) : T(f) == CLOS ? reduce(f, t, e) : err;
 }
 
-/* evaluate x and return its value in environment e */
+/* evaluate x and return its value in environment e
+If the x(pression) passed in is an atom, it's irreducibel so just obtain the value.
+If the x(pression) passed in is a list, then delegate to apply which will receive
+the (sub-)eval of the first element of the list and as arguments the CDR of the list.
+ */
 L eval(L x, L e) {
   return T(x) == ATOM ? assoc(x, e) : T(x) == CONS ? apply(eval(car(x), e), cdr(x), e) : x;
 }
 
 /* tokenization buffer and the next character that we are looking at */
-char buf[40], see = ' ';
+char buf[MAX_SCAN_BUF], see = ' ';
+#define IS_EOF() (see == EOF)
 
 /* advance to the next character */
-void look() {
-  int c = getchar();
-  see   = c;
-  if (c == EOF) freopen("/dev/tty","r",stdin);
-}
+static inline void look(void) { see = getc(stdin); }
 
-/* return nonzero if we are looking at character c, ' ' means any white space */
+/* return nonzero if we are looking at character c, ' ' means any white space
+   as all other white space like \n \r or \t happen before
+ */
 I seeing(char c) { return c == ' ' ? see > 0 && see <= c : see == c; }
 
 /* return the look ahead character from standard input, advance to the next */
@@ -317,40 +297,52 @@ char get() {
   return c;
 }
 
-/* tokenize into buf[], return first character of buf[] */
+/* tokenize into buf[], return first character of buf[]
+The following tokens are recognized:
+  '(',')', '\'', ' ', '\t', '\n'
+  any string composed of characters not of the above.
+*/
 char scan() {
   I i = 0;
+  // skip whitespace
   while (seeing(' ')) look();
+  // If I see one of this, I return only that
   if (seeing('(') || seeing(')') || seeing('\'')) buf[i++] = get();
   else do {
+      // else, I collect everything until I get to a closing parentheses or space.
       buf[i++] = get();
-    } while (i < 39 && !seeing('(') && !seeing(')') && !seeing(' '));
+    } while (i < (MAX_SCAN_BUF - 1) && !(IS_EOF() || seeing('(') || seeing(')') || seeing(' ')));
   buf[i] = 0;
   return *buf;
 }
 
 /* return the Lisp expression read from standard input */
-L parse();
-L read() {
+L parse(void);
+L Read(void) {
   scan();
+  // if (IS_EOF()) return nil;
   return parse();
 }
 
 /* return a parsed Lisp list */
 L list() {
   L x;
+  // First we look for the empty list.
   if (scan() == ')') return nil;
+  // Then we look for other lists, which do not
+  // use pair syntax.
   if (!strcmp(buf, ".")) {
-    x = read();
+    x = Read();
     scan();
     return x;
   }
+  // Now, we deal with pairs.
   x = parse();
   return cons(x, list());
 }
 
 /* return a parsed Lisp expression x quoted as (quote x) */
-L quote() { return cons(atom("quote"), cons(read(), nil)); }
+L quote() { return cons(atom("quote"), cons(Read(), nil)); }
 
 /* return a parsed atomic Lisp expression (a number or an atom) */
 L atomic() {
@@ -359,8 +351,13 @@ L atomic() {
   return (sscanf(buf, "%lg%n", &n, &i) > 0 && !buf[i]) ? n : atom(buf);
 }
 
+// clang-format off
 /* return a parsed Lisp expression */
-L parse() { return *buf == '(' ? list() : *buf == '\'' ? quote() : atomic(); }
+L parse(void) { return *buf == '(' ? list() : 
+                       *buf == '\'' ? quote() : 
+                       atomic(); 
+}
+// clang-format on
 
 /* display a Lisp list t */
 void print(L);
@@ -392,27 +389,46 @@ void print(L x) {
 void gc() { sp = ord(env); }
 
 /* Lisp initialization and REPL */
-// void init() {
-//   hp = 0, sp = N;
-//   nil = box(NIL, 0);
-//   err = atom("ERR");
-//   tru = atom("#t");
-//   env = pair(tru, tru, nil);
-//   for (I i = 0; prim[i].s; ++i) env = pair(atom(prim[i].s), box(PRIM, i), env);
-// }
-
-int _main() {
-  int i;
-  // init();
-  printf("tinylisp");
+void init_tinylisp() {
+  // reset heap an stack pointers.
+  hp = 0, sp = N;
+  // initialize scanner data.
+  see = ' ';
+  // Initialize a few things globally available.
   nil = box(NIL, 0);
   err = atom("ERR");
   tru = atom("#t");
+  // environment starts empty.
   env = pair(tru, tru, nil);
-  for (i = 0; prim[i].s; ++i) env = pair(atom(prim[i].s), box(PRIM, i), env);
-  while (1) {
+  // Initialize primitives, extending environment for each one.
+  for (int i = 0; prim[i].s; ++i) env = pair(atom(prim[i].s), box(PRIM, i), env);
+}
+
+/*
+The read-eval-print-loop
+
+The interactive prompt gives you a so-called read-eval-print-loop (REPL). 
+Tinylisp uses the read function to read in a lisp object, 
+evaluates it using eval, and prints it using print. Then prompt again. 
+
+The functions eval and apply interact in a fundamental way in the interpreter: 
+If we are evaluating an ordinary function call (which is represented as a list, of course),
+we evaluate the first element of the list to get the functions,
+evaluate the remaining elements to get the arguments, 
+and then use apply to apply the function to the arguments.
+
+(Notice that this is using call by value semantics, not lazy evaluation as in Haskell -- 
+  the arguments get evaluated before applying the function to them.) 
+*/
+int _main(int argc, char **argv) {
+  printf("tinylisp");
+  init_tinylisp();
+  while (true) {
     printf("\n%u>", sp - hp / 8);
-    print(eval(read(), env));
+    L read_data = Read();
+    if (IS_EOF()) break;
+    print(eval(read_data, env));
     gc();
   }
+  return 0;
 }
