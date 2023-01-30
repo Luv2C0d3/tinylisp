@@ -2,7 +2,7 @@ How to contribute
 =================
 
 Thank you for taking the time to contribute.  Let's keep moving forward
-together to make tinylisp a small functional lisp example.
+together to make tinylisp a small functional Lisp system.
 
 The following is a set of guidelines for contributing.
 
