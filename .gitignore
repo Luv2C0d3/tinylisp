@@ -8,3 +8,4 @@ src/tinylisp-tested
 src/tinylisp-readline
 src/tinylisp-commented
 src/tinylisp-opt
+test/test-tl-tested

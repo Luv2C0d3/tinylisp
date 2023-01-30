@@ -291,7 +291,7 @@ static inline void look(void) { see = getc(stdin); }
 I seeing(char c) { return c == ' ' ? see > 0 && see <= c : see == c; }
 
 /* return the look ahead character from standard input, advance to the next */
-char get() {
+char get(void) {
   char c = see;
   look();
   return c;
@@ -302,7 +302,7 @@ The following tokens are recognized:
   '(',')', '\'', ' ', '\t', '\n'
   any string composed of characters not of the above.
 */
-char scan() {
+char scan(void) {
   I i = 0;
   // skip whitespace
   while (seeing(' ')) look();
@@ -325,7 +325,7 @@ L Read(void) {
 }
 
 /* return a parsed Lisp list */
-L list() {
+L list(void) {
   L x;
   // First we look for the empty list.
   if (scan() == ')') return nil;
@@ -342,10 +342,10 @@ L list() {
 }
 
 /* return a parsed Lisp expression x quoted as (quote x) */
-L quote() { return cons(atom("quote"), cons(Read(), nil)); }
+L quote(void) { return cons(atom("quote"), cons(Read(), nil)); }
 
 /* return a parsed atomic Lisp expression (a number or an atom) */
-L atomic() {
+L atomic(void) {
   L n;
   I i;
   return (sscanf(buf, "%lg%n", &n, &i) > 0 && !buf[i]) ? n : atom(buf);
@@ -386,11 +386,11 @@ void print(L x) {
 }
 
 /* garbage collection removes temporary cells, keeps global environment */
-void gc() { sp = ord(env); }
+void gc(void) { sp = ord(env); }
 
 /* Lisp initialization and REPL */
-void init_tinylisp() {
-  // reset heap an stack pointers.
+void init_tinylisp(void) {
+  // reset heap and stack pointers.
   hp = 0, sp = N;
   // initialize scanner data.
   see = ' ';
@@ -407,18 +407,18 @@ void init_tinylisp() {
 /*
 The read-eval-print-loop
 
-The interactive prompt gives you a so-called read-eval-print-loop (REPL). 
-Tinylisp uses the read function to read in a lisp object, 
-evaluates it using eval, and prints it using print. Then prompt again. 
+The interactive prompt gives you a so-called read-eval-print-loop (REPL).
+Tinylisp uses the read function to read in a lisp object,
+evaluates it using eval, and prints it using print. Then prompt again.
 
-The functions eval and apply interact in a fundamental way in the interpreter: 
+The functions eval and apply interact in a fundamental way in the interpreter:
 If we are evaluating an ordinary function call (which is represented as a list, of course),
 we evaluate the first element of the list to get the functions,
-evaluate the remaining elements to get the arguments, 
+evaluate the remaining elements to get the arguments,
 and then use apply to apply the function to the arguments.
 
-(Notice that this is using call by value semantics, not lazy evaluation as in Haskell -- 
-  the arguments get evaluated before applying the function to them.) 
+(Notice that this is using call by value semantics, not lazy evaluation as in Haskell --
+  the arguments get evaluated before applying the function to them.)
 */
 int _main(int argc, char **argv) {
   printf("tinylisp");
